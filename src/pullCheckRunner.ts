@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import { IInputSettings } from "./inputSettings";
+import { actions, pulls } from "./octokitCompat";
 
 export class PullCheckRunner {
     readonly settings: IInputSettings;
@@ -22,7 +23,7 @@ export class PullCheckRunner {
         core.debug(`Self workflow ID  is ${workflowId}`);
         core.debug(`PR branch is ${prBranch}`)
 
-        const runs = await this.settings.octokitLocal.actions.listWorkflowRuns({
+        const runs = await actions(this.settings.octokitLocal).listWorkflowRuns({
             owner: this.settings.localRepositoryOwner,
             repo: this.settings.localRepositoryName,
             branch: prBranch,
@@ -38,7 +39,7 @@ export class PullCheckRunner {
             // the CLA file and set of comments every time.
             const run = runs.data.workflow_runs[0].id;
             core.debug(`Rerunning build run ${run}`);
-            await this.settings.octokitLocal.actions.reRunWorkflow({
+            await actions(this.settings.octokitLocal).reRunWorkflow({
                 owner: this.settings.localRepositoryOwner,
                 repo: this.settings.localRepositoryName,
                 run_id: run,
@@ -47,7 +48,7 @@ export class PullCheckRunner {
     }
 
     private async getSelfWorkflowId(): Promise<number> {
-        const workflowList = await this.settings.octokitLocal.actions.listRepoWorkflows({
+        const workflowList = await actions(this.settings.octokitLocal).listRepoWorkflows({
             owner: this.settings.localRepositoryOwner,
             repo: this.settings.localRepositoryName,
         });
@@ -63,7 +64,7 @@ export class PullCheckRunner {
     }
 
     private async getBranchOfPullRequest(): Promise<string> {
-        const pr = await this.settings.octokitLocal.pulls.get({
+        const pr = await pulls(this.settings.octokitLocal).get({
             owner: this.settings.localRepositoryOwner,
             repo: this.settings.localRepositoryName,
             pull_number: this.settings.pullRequestNumber

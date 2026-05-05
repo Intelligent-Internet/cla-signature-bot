@@ -8,7 +8,7 @@ function ParseRepoName(rawRepoName: string): [string, string] {
     // We want to fail hard because someone attempted to provide a value here but it was't valid.
     let split = rawRepoName.split('/');
     if (split.length != 2) {
-        throw new Error(`Unable to parse repository name ${rawRepoName} into owner/repo-name format. Make sure the remote-repo-name is set correctly.`);
+        throw new Error(`Unable to parse repository name ${rawRepoName} into owner/repo-name format. Make sure the repository input is set correctly.`);
     }
 
     return split as [string, string];
@@ -22,22 +22,25 @@ export function getInputs(): IInputSettings {
     settings.payloadAction = context.payload.action;
     settings.workflowName = context.workflow;
     settings.localAccessToken = process.env["GITHUB_TOKEN"] as string;
+    settings.workflowRunId = Number(process.env["GITHUB_RUN_ID"]) || undefined;
 
     // Using a boolean setting makes the user's intention clear and easier to validate.
-    settings.isRemoteRepo = (core.getInput("use-remote-repo") || 'FALSE').toUpperCase() === 'TRUE';
+    const signatureRepoInput = core.getInput("signature-repo");
+    settings.isRemoteRepo = !!signatureRepoInput || (core.getInput("use-remote-repo") || 'FALSE').toUpperCase() === 'TRUE';
 
     // Let github core perform the validation if it's necessary.
     const required = { required: true } as core.InputOptions;
 
     // The repo name should be owner/repo-name and needs to be split to be used.
     [settings.remoteRepositoryOwner, settings.remoteRepositoryName] = ParseRepoName(
+        signatureRepoInput ||
         core.getInput("remote-repo-name", { required: settings.isRemoteRepo }) ||
         context.repo.owner + "/" + context.repo.repo);
 
     // If this action is run from a fork this value will be blank. Assume the remote repo
     // is publicly readable and the local access token can be used to at least read the CLA
     // file. Mark the repo as readonly so we can check to see if we should attempt to write.
-    const remoteRepoPat = core.getInput("remote-repo-pat");
+    const remoteRepoPat = process.env["CLA_RECORDS_TOKEN"] || core.getInput("signature-repo-token") || core.getInput("remote-repo-pat");
     if (!remoteRepoPat) {
         // Only readonly if we're trying to use a remote repo at all.
         settings.isRemoteRepoReadonly = settings.isRemoteRepo;
@@ -51,6 +54,11 @@ export function getInputs(): IInputSettings {
     settings.localRepositoryName = context.repo.repo;
 
     settings.claFilePath = core.getInput("path-to-signatures") || "signatures/cla.json";
+    settings.signatureRoot = trimSlashes(core.getInput("signature-root") || "signatures");
+    settings.agreementId = core.getInput("agreement-id") || "default-cla";
+    settings.agreementVersion = core.getInput("agreement-version") || "v1";
+    settings.agreementPath = core.getInput("agreement-path") || "";
+    settings.repoPolicyPath = core.getInput("repo-policy-path") || "";
     settings.branch = core.getInput("branch") || "master";
     settings.whitelist = core.getInput("whitelist") || "";
 
@@ -67,7 +75,7 @@ export function getInputs(): IInputSettings {
 
     // This is technically deprecated, see the note in pullComments.ts on why.
     settings.emptyCommitFlag = (core.getInput('empty-commit-flag') || 'FALSE').toUpperCase() === 'TRUE';
-    settings.claDocUrl = core.getInput('url-to-cladocument', required);
+    settings.claDocUrl = core.getInput('url-to-cladocument') || settings.agreementPath || `${settings.agreementId}/${settings.agreementVersion}`;
 
     settings.octokitLocal = github.getOctokit(settings.localAccessToken);
     settings.octokitRemote = github.getOctokit(settings.repositoryAccessToken);
@@ -80,6 +88,14 @@ export function getInputs(): IInputSettings {
 function writeOutSettings(settings: IInputSettings) {
     core.debug("All input settings constructed:");
     for (var prop in settings) {
+        if (prop.toLowerCase().includes("token") || prop.toLowerCase().includes("octokit")) {
+            core.debug(`${prop}: [redacted]`);
+            continue;
+        }
         core.debug(`${prop}: ${settings[prop]}`);
     }
+}
+
+function trimSlashes(value: string): string {
+    return value.replace(/^\/+|\/+$/g, "");
 }

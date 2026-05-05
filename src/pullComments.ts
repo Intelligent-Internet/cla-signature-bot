@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import { IInputSettings } from "./inputSettings";
 import { AuthorMap } from "./authorMap";
+import { issues, repos } from "./octokitCompat";
 import { SignEvent } from "./signEvent";
 
 export class PullComments {
@@ -18,7 +19,7 @@ export class PullComments {
         const existingComment = await this.getExistingComment();
         try{
             if (!existingComment) {
-                let result = await this.settings.octokitLocal.issues.createComment({
+                let result = await issues(this.settings.octokitLocal).createComment({
                     owner: this.settings.localRepositoryOwner,
                     repo: this.settings.localRepositoryName,
                     issue_number: this.settings.pullRequestNumber,
@@ -26,7 +27,7 @@ export class PullComments {
                 });
                 return result.data.body;
             } else {
-                let result = await this.settings.octokitLocal.issues.updateComment({
+                let result = await issues(this.settings.octokitLocal).updateComment({
                     owner: this.settings.localRepositoryOwner,
                     repo: this.settings.localRepositoryName,
                     comment_id: existingComment.id,
@@ -48,7 +49,7 @@ export class PullComments {
 
     private async getExistingComment() {
         try {
-            const response = await this.settings.octokitLocal.issues.listComments({
+            const response = await issues(this.settings.octokitLocal).listComments({
                 owner: this.settings.localRepositoryOwner,
                 repo: this.settings.localRepositoryName,
                 issue_number: this.settings.pullRequestNumber
@@ -61,10 +62,15 @@ export class PullComments {
 
     private getCommentContent(authorMap: AuthorMap): string {
         if (authorMap.allSigned()) {
-            return `**${this.BotName}:** All authors have signed the CLA. You may need to manually re-run the blocking PR check if it doesn't pass in a few minutes.`;
+            const signed = authorMap.getSigned().map(a => `- @${a.name}`).join("\n");
+            return `**${this.BotName}:** CLA status
+
+Signed:
+${signed}
+
+All authors have signed the CLA.`;
         }
 
-        const subjectString = (authorMap.count > 1) ? "you all" : "you";
         const claUrl = this.settings.claDocUrl;
         const signatureString = this.settings.signatureText;
 
@@ -75,11 +81,12 @@ export class PullComments {
 
         let noAccount = authorMap.getNonGithubAccounts();
 
-        authorText += `**${signed.length}** out of **${authorMap.count}** committers have signed the CLA.\n`;
-        signed.forEach(a => authorText += `:white_check_mark: @${a.name}\n`);
+        authorText += `Signed:\n`;
+        authorText += signed.length > 0 ? signed.map(a => `- @${a.name}`).join("\n") + "\n" : "- None\n";
+        authorText += `\nNeeds signature:\n`;
         unsigned.forEach(a => {
             const hasNoAccount = noAccount.filter(acc => acc.name === a.name).length > 0;
-            authorText += `:x: ${hasNoAccount ? '' : '@'}${a.name}\n`;
+            authorText += `- ${hasNoAccount ? '' : '@'}${a.name}\n`;
         });
 
         if (noAccount.length > 0) {
@@ -88,13 +95,13 @@ export class PullComments {
             authorText += "You need a GitHub account to be able to sign the CLA. If you have already a GitHub account, please [add the email address used for this commit to your account](https://help.github.com/articles/why-are-my-commits-linked-to-the-wrong-user/#commits-are-not-linked-to-any-user)."
         }
 
-        return `**${this.BotName}:**
+        return `**${this.BotName}:** CLA status
 
-Thank you for your submission, we really appreciate it. Like many open-source projects, we ask that ${subjectString} read and sign our [Contributor License Agreement](${claUrl}) before we can accept your contribution. You can sign the CLA by just by adding a comment to this pull request with this exact sentence:
+Please read the [Contributor License Agreement](${claUrl}) and sign by adding a comment to this pull request with this exact sentence:
 
 > ***${signatureString}***
 
-By commenting with the above message you are agreeing to the terms of the CLA. Your account will be recorded as agreeing to our CLA so you don't need to sign it again for future contributions to our company's repositories.
+By commenting with the above message you are agreeing to the terms of the CLA. Your GitHub account will be recorded as agreeing to this organization-level CLA.
 
 ${authorText}
 `;
@@ -107,7 +114,7 @@ ${authorText}
         }
 
         const [commentList, repoId] = await Promise.all([
-            this.settings.octokitLocal.issues.listComments({
+            issues(this.settings.octokitLocal).listComments({
                 owner: this.settings.localRepositoryOwner,
                 repo: this.settings.localRepositoryName,
                 issue_number: this.settings.pullRequestNumber
@@ -122,6 +129,8 @@ ${authorText}
             .map(comment => ({
                 id: comment.user.id,
                 name: comment.user.login,
+                email: unsigned.find(a => a.id === comment.user.id)?.email,
+                email_source: unsigned.find(a => a.id === comment.user.id)?.emailSource,
                 pullRequestNo: this.settings.pullRequestNumber,
                 comment_id: comment.id,
                 created_at: comment.created_at,
@@ -130,7 +139,7 @@ ${authorText}
     }
 
     private async getRepoId(): Promise<number> {
-        return (await this.settings.octokitLocal.repos.get({
+        return (await repos(this.settings.octokitLocal).get({
             owner: this.settings.localRepositoryOwner,
             repo: this.settings.localRepositoryName
         })).data.id;

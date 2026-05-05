@@ -5,9 +5,30 @@ branding:
   icon: "award"
   color: blue
 inputs:
+  signature-repo:
+    description: "Private owner/repo where CLA agreements and signature JSON records are stored."
+    required: true
+  signature-root:
+    description: "Root directory in the private signature repo for per-user signature records."
+    default: "signatures"
+  signature-repo-token:
+    description: "Token for the private signature repo. Prefer CLA_RECORDS_TOKEN in env instead."
+    default: ""
+  agreement-id:
+    description: "Organization-level CLA agreement identifier."
+    required: true
+  agreement-version:
+    description: "Required agreement version, for example v1."
+    required: true
+  agreement-path:
+    description: "Path to the agreement text in the private signature repo."
+    required: true
+  repo-policy-path:
+    description: "Optional path to this repository's policy file in the private signature repo."
+    default: ""
   url-to-cladocument:
     description: "The URL for the CLA contract."
-    required: true
+    required: false
   path-to-signatures:
     description: "Give a path for storing CLAs in a json file."
     default: "signatures/cla.json"
@@ -37,5 +58,5 @@ inputs:
   signature-regex:
     description: "The regex to locate the signature text. Should be single quoted. Note that comment bodies are toUpperCase'd before matching."
 runs:
-  using: "node16"
+  using: "node20"
   main: "dist/index.js"

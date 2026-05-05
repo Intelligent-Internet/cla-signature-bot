@@ -1,5 +1,4 @@
 import * as core from '@actions/core';
-import fetch from "node-fetch";
 import { IInputSettings } from './inputSettings';
 import { SignEvent } from './signEvent';
 
@@ -26,7 +25,6 @@ export class BlockchainPoster {
                 },
                 body: JSON.stringify(signEvent)
             };
-            core.debug(`Webhook contents: ${JSON.stringify(config)}`);
             const res = await fetch(this.settings.blockchainWebhookEndpoint, config);
             const response = await res.json();
             core.debug("the response of the webhook is " + JSON.stringify(response));

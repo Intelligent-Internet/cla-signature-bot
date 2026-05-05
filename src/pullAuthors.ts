@@ -1,6 +1,5 @@
 import { IInputSettings } from "./inputSettings";
-import { Author, AuthorMap } from "./authorMap";
-import { SignEvent } from "./signEvent";
+import { Author } from "./authorMap";
 
 export class PullAuthors {
     private getCommitAuthorsQuery = `
@@ -53,7 +52,7 @@ query($owner:String! $name:String! $number:Int! $cursor:String!){
         const result = await this.queryForCommitAuthors();
         return result.repository.pullRequest.commits.edges
             .map(e => this.getUserFromCommit(e.node.commit)) // Get the authors
-            .filter((author: Author, index: number, self: Author[]) => self.findIndex(a => a.name === author.name) === index) // Only unique authors
+            .filter((author: Author, index: number, self: Author[]) => self.findIndex(a => a.id === author.id && a.name === author.name) === index) // Only unique authors
             .filter((a: Author) => a.id !== 41898282); // And skip accounts with this ID for some reason?
     }
 
@@ -86,8 +85,22 @@ query($owner:String! $name:String! $number:Int! $cursor:String!){
         return new Author({
             name: author.login || author.name,
             id: author.databaseId || undefined,
+            email: commit.author?.email || "",
+            emailSource: getEmailSource(commit.author?.email),
             pullRequestNo: this.settings.pullRequestNumber,
             signed: false
         });
     }
+}
+
+function getEmailSource(email?: string): string {
+    if (!email) {
+        return "unknown";
+    }
+
+    if (email.endsWith("users.noreply.github.com")) {
+        return "github_noreply";
+    }
+
+    return "commit_author_email";
 }

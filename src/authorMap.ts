@@ -44,17 +44,23 @@ export class AuthorMap {
 export class Author {
     readonly name: string;
     readonly id?: number;
+    readonly email?: string;
+    readonly emailSource?: string;
     readonly pullRequestNo?: number;
     readonly signed: boolean;
 
-    constructor({ name, id, pullRequestNo, signed }: {
+    constructor({ name, id, email, emailSource, pullRequestNo, signed }: {
         name: string;
         id?: number;
+        email?: string;
+        emailSource?: string;
         pullRequestNo?: number;
         signed: boolean
     }) {
         this.name = name;
         this.id = id;
+        this.email = email;
+        this.emailSource = emailSource;
         this.pullRequestNo = pullRequestNo;
         this.signed = signed;
     }

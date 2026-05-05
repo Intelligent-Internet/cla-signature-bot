@@ -1,5 +1,3 @@
-import { GitHub } from "@actions/github/lib/utils";
-
 export interface IInputSettings {
     /**
      * The payload action triggering the action run.
@@ -62,6 +60,36 @@ export interface IInputSettings {
     claFilePath: string
 
     /**
+     * The root directory in the signature repository for per-user signature JSON.
+     */
+    signatureRoot: string
+
+    /**
+     * The organization-level agreement identifier.
+     */
+    agreementId: string
+
+    /**
+     * The agreement version required for this repository.
+     */
+    agreementVersion: string
+
+    /**
+     * The path to the agreement text in the signature repository.
+     */
+    agreementPath: string
+
+    /**
+     * Optional path to this public repository's policy file in the signature repository.
+     */
+    repoPolicyPath: string
+
+    /**
+     * GitHub Actions run id, used for private audit records.
+     */
+    workflowRunId?: number
+
+    /**
      * The branch of the repo where the CLA file is stored.
      */
     branch: string
@@ -104,10 +132,10 @@ export interface IInputSettings {
     /**
      * The octokit instance for interacting with the CLA file's repository.
      */
-    octokitRemote: InstanceType<typeof GitHub>
+    octokitRemote: any
 
     /**
      * The octokit instance for interacting with this repository.
      */
-    octokitLocal: InstanceType<typeof GitHub>
+    octokitLocal: any
 }

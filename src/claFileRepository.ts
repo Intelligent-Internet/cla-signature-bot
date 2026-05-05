@@ -1,84 +1,159 @@
 import * as core from '@actions/core';
-import { ClaFile } from "./claFile";
+import { createHash } from "crypto";
+import { Author, AuthorMap } from "./authorMap";
 import { IInputSettings } from "./inputSettings";
+import { repos } from "./octokitCompat";
+import { SignatureRecord } from "./signatureRecord";
 
 export class ClaFileRepository {
     readonly settings: IInputSettings;
-
-    private _file?: ClaFile;
-    private _fileSha?: string;
+    private _agreementSha256?: string;
 
     constructor(settings: IInputSettings) {
         this.settings = settings;
     }
 
-    public async getClaFile(): Promise<ClaFile> {
-        if (!this._file) {
-            [this._file, this._fileSha] = await this.getOrCreateClaFile();
-        }
-
-        return this._file;
+    public signaturePath(agreementId: string, version: string, githubId: number): string {
+        return [
+            this.settings.signatureRoot,
+            agreementId,
+            version,
+            `github-id-${githubId}.json`
+        ].filter(Boolean).join("/");
     }
 
-    public async commitClaFile(commitMessage = "Updating CLA Signature File"): Promise<ClaFile> {
-        // Ensure the SHA is up to date before proceeding
-        if (!this._file) {
-            [this._file, this._fileSha] = await this.getOrCreateClaFile();
-        }
-
-        core.debug("Committing CLA file back to source repository.");
-        const updateResult = await this.updateClaFile(commitMessage, this._file, this._fileSha);
-        this._fileSha = updateResult.data.commit.sha;
-        return this._file;
-    }
-
-    private async getOrCreateClaFile(): Promise<[ClaFile, string]> {
-        core.debug("Getting CLA file from source repository.");
+    public async readSignature(agreementId: string, version: string, githubId: number): Promise<SignatureRecord | undefined> {
         try {
-            const fileResult = await this.settings.octokitRemote.repos.getContents({
+            const fileResult = await repos(this.settings.octokitRemote).getContent({
                 owner: this.settings.remoteRepositoryOwner,
                 repo: this.settings.remoteRepositoryName,
-                path: this.settings.claFilePath,
+                path: this.signaturePath(agreementId, version, githubId),
                 ref: this.settings.branch,
             });
 
-            // We shouldn't get back an array for this, if we do it's a config problem.
-            if (Array.isArray(fileResult.data)) {
-                throw new Error("More than one file was found for the CLA file path. Make sure the CLA file path setting references a single file, not a path.");
+            if (Array.isArray(fileResult.data) || !("content" in fileResult.data)) {
+                throw new Error("Signature path resolved to a directory instead of a JSON file.");
             }
 
-            // Cache the Sha in case we need to add commits to the operation.
-            return [new ClaFile(fileResult.data.content), fileResult.data.sha];
+            return JSON.parse(Buffer.from(fileResult.data.content, "base64").toString("utf8")) as SignatureRecord;
         } catch (error: any) {
-            // Only want to catch if the result is a response with a 404 error code, indicating no file was found.
             if (error.status === 404) {
-                core.debug("Creating CLA file as it does not currently exist.");
-                const claFile = new ClaFile();
-                const createResult = await this.updateClaFile("Creating CLA signature file", claFile);
-
-                return [claFile, createResult.data.commit.sha];
-            } else {
-                throw new Error(`Failed to get CLA file contents: ${error.message}. Details: ${JSON.stringify(error.stack)}`);
+                return undefined;
             }
+
+            throw new Error(`Failed to get signature record: ${error.message}. Details: ${JSON.stringify(error.stack)}`);
         }
     }
 
-    private async updateClaFile(
-        commitMessage: string,
-        claFile: ClaFile,
-        fileSha?: string): Promise<any> {
+    public async writeSignature(signatureRecord: SignatureRecord): Promise<void> {
         if (this.settings.isRemoteRepoReadonly) {
-            throw new Error(`Cannot write to remote repo as no remote-repo-pat was provided. This usually means this check was run in a pull request from a fork. Initialize the CLA file manually, or open a PR from a branch in the protected repository, not a fork, and using an account that is not whitelisted.`);
+            throw new Error("Cannot write to the private signature repository because no CLA_RECORDS_TOKEN, signature-repo-token, or remote-repo-pat was provided.");
         }
 
-        return await this.settings.octokitRemote.repos.createOrUpdateFile({
+        const path = this.signaturePath(
+            signatureRecord.agreement_id,
+            signatureRecord.agreement_version,
+            signatureRecord.github_id
+        );
+        const existing = await this.getContentSha(path);
+
+        await repos(this.settings.octokitRemote).createOrUpdateFileContents({
             owner: this.settings.remoteRepositoryOwner,
             repo: this.settings.remoteRepositoryName,
-            path: this.settings.claFilePath,
+            path,
             branch: this.settings.branch,
-            message: commitMessage,
-            content: claFile.toBase64(),
-            sha: fileSha,
+            message: `Add CLA signature for github-id-${signatureRecord.github_id}`,
+            content: Buffer.from(JSON.stringify(signatureRecord, null, 2)).toString("base64"),
+            sha: existing,
         });
+    }
+
+    public async signatureExists(
+        agreementId: string,
+        version: string,
+        githubId: number,
+        agreementSha256?: string
+    ): Promise<boolean> {
+        const record = await this.readSignature(agreementId, version, githubId);
+        if (!record) {
+            return false;
+        }
+
+        return !agreementSha256 || record.agreement_sha256 === agreementSha256;
+    }
+
+    public async mapSignedAuthors(authors: Author[]): Promise<AuthorMap> {
+        const agreementSha256 = await this.getAgreementSha256();
+        const mapped = await Promise.all(authors.map(async a =>
+            new Author({
+                name: a.name,
+                id: a.id,
+                email: a.email,
+                emailSource: a.emailSource,
+                pullRequestNo: a.pullRequestNo,
+                signed: !!a.id && await this.signatureExists(
+                    this.settings.agreementId,
+                    this.settings.agreementVersion,
+                    a.id,
+                    agreementSha256
+                )
+            })
+        ));
+
+        return new AuthorMap(mapped);
+    }
+
+    public async getAgreementSha256(): Promise<string> {
+        if (this._agreementSha256 !== undefined) {
+            return this._agreementSha256;
+        }
+
+        if (!this.settings.agreementPath) {
+            core.warning("No agreement-path was provided; signature checks will not bind records to CLA text hash.");
+            this._agreementSha256 = "";
+            return this._agreementSha256;
+        }
+
+        try {
+            const fileResult = await repos(this.settings.octokitRemote).getContent({
+                owner: this.settings.remoteRepositoryOwner,
+                repo: this.settings.remoteRepositoryName,
+                path: this.settings.agreementPath,
+                ref: this.settings.branch,
+            });
+
+            if (Array.isArray(fileResult.data) || !("content" in fileResult.data)) {
+                throw new Error("Agreement path resolved to a directory instead of a file.");
+            }
+
+            const agreementText = Buffer.from(fileResult.data.content, "base64").toString("utf8");
+            this._agreementSha256 = createHash("sha256").update(agreementText, "utf8").digest("hex");
+            return this._agreementSha256;
+        } catch (error: any) {
+            throw new Error(`Failed to get agreement text for hashing: ${error.message}. Details: ${JSON.stringify(error.stack)}`);
+        }
+    }
+
+    private async getContentSha(path: string): Promise<string | undefined> {
+        try {
+            const fileResult = await repos(this.settings.octokitRemote).getContent({
+                owner: this.settings.remoteRepositoryOwner,
+                repo: this.settings.remoteRepositoryName,
+                path,
+                ref: this.settings.branch,
+            });
+
+            if (Array.isArray(fileResult.data)) {
+                throw new Error("Signature path resolved to a directory instead of a JSON file.");
+            }
+
+            return fileResult.data.sha;
+        } catch (error: any) {
+            if (error.status === 404) {
+                return undefined;
+            }
+
+            throw error;
+        }
     }
 }

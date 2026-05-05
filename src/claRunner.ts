@@ -7,6 +7,8 @@ import { IInputSettings } from "./inputSettings";
 import { PullComments } from './pullComments';
 import { PullAuthors } from './pullAuthors';
 import { PullCheckRunner } from './pullCheckRunner';
+import { buildSignatureRecord } from './signatureRecord';
+import { issues } from './octokitCompat';
 
 export class ClaRunner {
     readonly settings: IInputSettings;
@@ -61,20 +63,29 @@ export class ClaRunner {
         core.debug(`Found a total of ${rawAuthors.length} authors after whitelisting.`);
         core.debug(`Authors: ${rawAuthors.map(n => n.name).join(', ')}`);
 
-        const claFile = await this.claFileRepository.getClaFile();
-        let authorMap = claFile.mapSignedAuthors(rawAuthors);
+        const agreementSha256 = await this.claFileRepository.getAgreementSha256();
+        let authorMap = await this.claFileRepository.mapSignedAuthors(rawAuthors);
 
-        let newSignature = claFile.addSignature(await this.pullComments.getNewSignatures(authorMap));
+        let newSignature = await this.pullComments.getNewSignatures(authorMap);
         if (newSignature.length > 0) {
             const newNames = newSignature.map(s => s.name).join(', ');
             core.debug(`Found new signatures: ${newNames}.`)
-            authorMap = claFile.mapSignedAuthors(rawAuthors);
+            const signatureRecords = newSignature.map(sig =>
+                buildSignatureRecord(
+                    sig,
+                    rawAuthors.find(a => a.id === sig.id),
+                    this.settings,
+                    agreementSha256
+                )
+            );
+
             await Promise.all([
-                this.claFileRepository.commitClaFile(`Add ${newNames}.`),
+                ...signatureRecords.map(record => this.claFileRepository.writeSignature(record)),
                 this.blockchainPoster.postToBlockchain(newSignature),
-                this.pullComments.setClaComment(authorMap),
                 this.pullCheckRunner.rerunLastCheck()
             ]);
+            authorMap = await this.claFileRepository.mapSignedAuthors(rawAuthors);
+            await this.pullComments.setClaComment(authorMap);
         } else {
             await this.pullComments.setClaComment(authorMap);
         }
@@ -90,7 +101,7 @@ export class ClaRunner {
     private async lockPullRequest(): Promise<any> {
         core.info(`Locking pull request #${this.settings.pullRequestNumber} to safe guard the pull request's CLA signatures.`);
         try {
-            await this.settings.octokitLocal.issues.lock({
+            await issues(this.settings.octokitLocal).lock({
                 owner: this.settings.localRepositoryOwner,
                 repo: this.settings.localRepositoryName,
                 issue_number: this.settings.pullRequestNumber

@@ -1,14 +1,11 @@
-jest.mock('node-fetch', () => jest.fn());
-
-import fetch from 'node-fetch';
-const { Response } = jest.requireActual('node-fetch');
-
 import { IInputSettings } from "../src/inputSettings";
 import { BlockchainPoster } from "../src/blockchainPoster";
 
+const fetchMock = jest.fn();
+
 afterEach(() => {
     jest.resetAllMocks();
-    jest.mocked(fetch).mockClear()
+    global.fetch = undefined as any;
 })
 
 it("Returns early if the flag is false", async () => {
@@ -19,11 +16,11 @@ it("Returns early if the flag is false", async () => {
     const poster = new BlockchainPoster(settings);
     await poster.postToBlockchain([]);
 
-    expect(fetch).toHaveBeenCalledTimes(0);
+    expect(fetchMock).toHaveBeenCalledTimes(0);
 });
 
 it("Posts the whole input array", async() => {
-    jest.mocked(fetch).mockImplementation((): Promise<any> => {
+    global.fetch = fetchMock.mockImplementation((): Promise<any> => {
         return Promise.resolve({
             json() {
                 return Promise.resolve({success: true});
@@ -38,8 +35,8 @@ it("Posts the whole input array", async() => {
     const poster = new BlockchainPoster(settings);
     await poster.postToBlockchain([]);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenLastCalledWith(settings.blockchainWebhookEndpoint, {
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenLastCalledWith(settings.blockchainWebhookEndpoint, {
         method: 'POST',
         headers: {
             'Accept': 'application/json',
