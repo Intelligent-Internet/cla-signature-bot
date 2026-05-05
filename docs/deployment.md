@@ -25,12 +25,12 @@ Example policy:
   "agreement_id": "your-org-cla",
   "required_version": "v1",
   "allow_later_versions": false,
-  "public_display_fields": ["github_login"],
-  "require_all_commit_authors": true,
   "allow_bot_users": true,
   "excluded_github_ids": []
 }
 ```
+
+When `repo-policy-path` is configured, the action reads this JSON from the private records repository and fails closed unless `repo`, `agreement_id`, and `required_version` exactly match the workflow inputs and current repository. `allow_later_versions` must currently be `false`; later-version matching is unsupported. `excluded_github_ids` removes those GitHub user ids from the author set before CLA checks. Policy file contents are never printed in public comments or logs.
 
 4. Create the signature root directory when you initialize the repo:
 
@@ -136,6 +136,10 @@ jobs:
 ```
 
 Security note: `pull_request_target` must not checkout or execute code from fork pull requests. This action only reads PR metadata, commits, and comments.
+
+Required input note: `signature-repo`, `agreement-id`, `agreement-version`, and `agreement-path` are mandatory. The action also requires `CLA_RECORDS_TOKEN` or `signature-repo-token` for the private signature repository; `remote-repo-pat` remains accepted only for legacy workflows. Missing `agreement-path` is an error because signature records are bound to the SHA-256 hash of the CLA text.
+
+Blockchain note: blockchain storage and webhook forwarding are removed and unsupported. Signature events, including contributor email metadata stored in the private record, are not posted to external blockchain webhooks.
 
 ## 5. Configure Branch Protection
 

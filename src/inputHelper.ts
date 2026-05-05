@@ -2,17 +2,7 @@ import * as core from "@actions/core";
 import * as github from '@actions/github';
 import { context } from "@actions/github";
 import { IInputSettings } from "./inputSettings";
-
-function ParseRepoName(rawRepoName: string): [string, string] {
-    // Repo name must be in the format owner/repo-name. If no / is found, fail.
-    // We want to fail hard because someone attempted to provide a value here but it was't valid.
-    let split = rawRepoName.split('/');
-    if (split.length != 2) {
-        throw new Error(`Unable to parse repository name ${rawRepoName} into owner/repo-name format. Make sure the repository input is set correctly.`);
-    }
-
-    return split as [string, string];
-}
+import { parseRepositoryName, validateBranch, validateIdentifier, validateRelativePath } from "./inputValidator";
 
 export function getInputs(): IInputSettings {
     const settings = {} as IInputSettings;
@@ -24,42 +14,29 @@ export function getInputs(): IInputSettings {
     settings.localAccessToken = process.env["GITHUB_TOKEN"] as string;
     settings.workflowRunId = Number(process.env["GITHUB_RUN_ID"]) || undefined;
 
-    // Using a boolean setting makes the user's intention clear and easier to validate.
-    const signatureRepoInput = core.getInput("signature-repo");
-    settings.isRemoteRepo = !!signatureRepoInput || (core.getInput("use-remote-repo") || 'FALSE').toUpperCase() === 'TRUE';
-
-    // Let github core perform the validation if it's necessary.
+    settings.isRemoteRepo = true;
     const required = { required: true } as core.InputOptions;
 
     // The repo name should be owner/repo-name and needs to be split to be used.
-    [settings.remoteRepositoryOwner, settings.remoteRepositoryName] = ParseRepoName(
-        signatureRepoInput ||
-        core.getInput("remote-repo-name", { required: settings.isRemoteRepo }) ||
-        context.repo.owner + "/" + context.repo.repo);
+    [settings.remoteRepositoryOwner, settings.remoteRepositoryName] = parseRepositoryName(
+        core.getInput("signature-repo", required));
 
-    // If this action is run from a fork this value will be blank. Assume the remote repo
-    // is publicly readable and the local access token can be used to at least read the CLA
-    // file. Mark the repo as readonly so we can check to see if we should attempt to write.
     const remoteRepoPat = process.env["CLA_RECORDS_TOKEN"] || core.getInput("signature-repo-token") || core.getInput("remote-repo-pat");
     if (!remoteRepoPat) {
-        // Only readonly if we're trying to use a remote repo at all.
-        settings.isRemoteRepoReadonly = settings.isRemoteRepo;
-        settings.repositoryAccessToken = settings.localAccessToken;
-    } else {
-        settings.isRemoteRepoReadonly = false;
-        settings.repositoryAccessToken = remoteRepoPat;
+        throw new Error("A private signature repository token is required. Set CLA_RECORDS_TOKEN or signature-repo-token.");
     }
+    settings.isRemoteRepoReadonly = false;
+    settings.repositoryAccessToken = remoteRepoPat;
 
     settings.localRepositoryOwner = context.repo.owner;
     settings.localRepositoryName = context.repo.repo;
 
-    settings.claFilePath = core.getInput("path-to-signatures") || "signatures/cla.json";
-    settings.signatureRoot = trimSlashes(core.getInput("signature-root") || "signatures");
-    settings.agreementId = core.getInput("agreement-id") || "default-cla";
-    settings.agreementVersion = core.getInput("agreement-version") || "v1";
-    settings.agreementPath = core.getInput("agreement-path") || "";
-    settings.repoPolicyPath = core.getInput("repo-policy-path") || "";
-    settings.branch = core.getInput("branch") || "master";
+    settings.signatureRoot = validateRelativePath("signature-root", core.getInput("signature-root") || "signatures", { required: true });
+    settings.agreementId = validateIdentifier("agreement-id", core.getInput("agreement-id", required));
+    settings.agreementVersion = validateIdentifier("agreement-version", core.getInput("agreement-version", required));
+    settings.agreementPath = validateRelativePath("agreement-path", core.getInput("agreement-path", required), { required: true });
+    settings.repoPolicyPath = validateRelativePath("repo-policy-path", core.getInput("repo-policy-path") || "");
+    settings.branch = validateBranch(core.getInput("branch") || "master");
     settings.whitelist = core.getInput("whitelist") || "";
 
     settings.signatureText = core.getInput("signature-text") || "I have read the CLA Document and I hereby sign the CLA";
@@ -69,12 +46,6 @@ export function getInputs(): IInputSettings {
         throw new Error("Signature RegEx does not match against Signature Text. Confirm valid RegEx.");
     }
 
-    settings.blockchainWebhookEndpoint = core.getInput('blockchain-webhook-endpoint') ||
-        'https://u9afh6n36g.execute-api.eu-central-1.amazonaws.com/dev/webhook';
-    settings.blockchainStorageFlag = (core.getInput('blockchain-storage-flag') || 'FALSE').toUpperCase() === 'TRUE';
-
-    // This is technically deprecated, see the note in pullComments.ts on why.
-    settings.emptyCommitFlag = (core.getInput('empty-commit-flag') || 'FALSE').toUpperCase() === 'TRUE';
     settings.claDocUrl = core.getInput('url-to-cladocument') || settings.agreementPath || `${settings.agreementId}/${settings.agreementVersion}`;
 
     settings.octokitLocal = github.getOctokit(settings.localAccessToken);
@@ -88,7 +59,7 @@ export function getInputs(): IInputSettings {
 function writeOutSettings(settings: IInputSettings) {
     core.debug("All input settings constructed:");
     for (var prop in settings) {
-        if (prop.toLowerCase().includes("token") || prop.toLowerCase().includes("octokit")) {
+        if (shouldRedactSetting(prop)) {
             core.debug(`${prop}: [redacted]`);
             continue;
         }
@@ -96,6 +67,11 @@ function writeOutSettings(settings: IInputSettings) {
     }
 }
 
-function trimSlashes(value: string): string {
-    return value.replace(/^\/+|\/+$/g, "");
+function shouldRedactSetting(prop: string): boolean {
+    const normalized = prop.toLowerCase();
+    return normalized.includes("token")
+        || normalized.includes("octokit")
+        || normalized === "remoterepositoryowner"
+        || normalized === "remoterepositoryname"
+        || normalized === "repositoryaccesstoken";
 }

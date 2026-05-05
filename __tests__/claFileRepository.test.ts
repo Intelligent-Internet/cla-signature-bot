@@ -1,231 +1,163 @@
 import { ClaFileRepository } from "../src/claFileRepository"
 import { IInputSettings } from "../src/inputSettings";
 import * as github from '@actions/github';
-import { ClaFile } from "../src/claFile";
 import { Author } from "../src/authorMap";
-import { SignEvent } from "../src/signEvent";
+import { SignatureRecord } from "../src/signatureRecord";
 
 const mockGitHub = github.getOctokit("1234567890123456789012345678901234567890");
 
-const settings = {
+const baseSettings = {
     localRepositoryOwner: "some-owner",
     localRepositoryName: "repo-name",
-    claFilePath: "path/to/cla.json",
-    branch: "master",
+    remoteRepositoryOwner: "cla-owner",
+    remoteRepositoryName: "cla-records",
+    signatureRoot: "signatures",
+    agreementId: "org-cla",
+    agreementVersion: "v1",
+    agreementPath: "agreements/org-cla/v1.md",
+    repoPolicyPath: "repo-policy/some-owner__repo-name.json",
+    branch: "main",
     octokitRemote: mockGitHub,
 } as IInputSettings;
 
-const rawAuthor = new Author({
-    name: "SomeAccount",
-    id: 12345,
-    pullRequestNo: 5,
-    signed: true,
-});
-const fakeClaFileContents ={
-    signedContributors: [
-        {
-            name: rawAuthor.name,
-            comment_id: 5,
-            created_at: "Some timestamp",
-            id: rawAuthor.id,
-            pullRequestNo: rawAuthor.pullRequestNo,
-            repoId: 3
-        } as SignEvent
-    ]
-};
+const signatureRecord = {
+    schema_version: 1,
+    github_id: 12345,
+    github_login_at_signing: "SomeAccount",
+    email: "some@example.com",
+    email_source: "commit_author_email",
+    agreement_id: "org-cla",
+    agreement_version: "v1",
+    agreement_sha256: "agreement-hash",
+    signed_at: "2026-01-01T00:00:00.000Z",
+    signed_from_repo: "some-owner/repo-name",
+    signed_from_pr: 5,
+    signature_method: "github_issue_comment",
+    comment_id: 99,
+} as SignatureRecord;
 
-const claFile = new ClaFile(Buffer.from(JSON.stringify(fakeClaFileContents, null, 2)).toString("base64"))
-
-// There _must_ be some better way of mocking these but I can't find it and the internet
-// doesn't offer much insight. The 'recommended' way to mock Octokit is to use nock to
-// mock _the underlying network requests_ but I can't be the only one thinking that's backwards
-// when we have reasonably strongly typed methods we can intercept here instead.
-// So instead of mocking the unknown and ever-changing API URLs using nock we just use
-// spyOn to directly hijack the methods and return a specially crafted object.
-// It might be better to add fully filled out types based on observed responses to API
-// requests but this works fine for the purposes of making sure the code actually, you know
-// works as intended.
-// Unfortunately this method relies on understanding what API methods are called by
-// the methods under test, but so would using nock so I don't feel too bad about it.
-function mockWith(sha: string, createSha: string, content?: ClaFile) {
-    jest.resetAllMocks();
-
-    let getContentsSpy;
-    if (!content) {
-        getContentsSpy = jest.spyOn(mockGitHub.repos, 'getContents')
-        .mockImplementation(async (params) => { throw { status: 404 } });
-    } else {
-        getContentsSpy = jest.spyOn(mockGitHub.repos, 'getContents')
-        .mockImplementation(async (params) => ({
-            url: "",
-            data: {
-                type: "string",
-                encoding: "",
-                size: 1024,
-                name: "cla.json",
-                path: "/signatures/cla.json",
-                content: content.toBase64(),
-                sha: sha,
-                url: "",
-                git_url: "",
-                html_url: "",
-                download_url: "",
-                _links: {
-                    git: "",
-                    html: "",
-                    self: "",
-                },
-            },
-            status: 200,
-            headers: {
-                date: "",
-                "x-Octokit-media-type": "",
-                "x-Octokit-request-id": "",
-                "x-ratelimit-limit": "",
-                "x-ratelimit-remaining": "",
-                "x-ratelimit-reset": "",
-                link: "",
-                "last-modified": "",
-                etag: "",
-                status: "200",
-            },
-            [Symbol.iterator]: () => ({next: () =>  { return { value: null, done: true}}}),
-        }));
-    }
-
-    let createOrUpdateSpy = jest.spyOn(mockGitHub.repos, 'createOrUpdateFile')
-        .mockImplementation(async (params) => ({
-            url: "",
-            data: {
-                commit: {
-                    author: {
-                        date: "",
-                        email: "someuser@example.com",
-                        name: "author",
-                    },
-                    committer: {
-                        date: "",
-                        email: "someuser@example.com",
-                        name: "committer",
-                    },
-                    html_url: "",
-                    message: "Creating CLA signature file",
-                    node_id: "akljsfglkjdnsfg",
-                    sha: createSha,
-                    parents: [],
-                    tree: {
-                        sha: "idklol",
-                        url: "",
-                    },
-                    url: "",
-                    verification: {
-                        payload: "null",
-                        reason: "",
-                        signature: "",
-                        verified: true
-                    }
-                },
-                content: {
-                    _links: {self: "", html: "", git: ""},
-                    download_url: "",
-                    git_url: "",
-                    html_url: "",
-                    name: "cla.json",
-                    path: "path/to",
-                    sha: createSha,
-                    size: 1024,
-                    type: "file idk bro",
-                    url: "",
-                }
-            },
-            status: 200,
-            headers: {
-                date: "",
-                "x-Octokit-media-type": "",
-                "x-Octokit-request-id": "",
-                "x-ratelimit-limit": "",
-                "x-ratelimit-remaining": "",
-                "x-ratelimit-reset": "",
-                link: "",
-                "last-modified": "",
-                etag: "",
-                status: "200",
-            },
-            [Symbol.iterator]: () => ({next: () =>  { return { value: null, done: true}}}),
-        }));
-
-    return [getContentsSpy, createOrUpdateSpy];
+function contentResponse(content: unknown, sha = "sha-1") {
+    const body = typeof content === "string" ? content : JSON.stringify(content);
+    return {
+        data: {
+            content: Buffer.from(body).toString("base64"),
+            sha,
+        },
+    };
 }
 
 beforeEach(() => {
     jest.restoreAllMocks();
 });
 
-it('returns the cla file if one is found', async () => {
-    const [getContentsSpy, createOrUpdateSpy] = mockWith("12345", "67890", claFile);
-    const fileRepo = new ClaFileRepository(settings);
-    const file = await fileRepo.getClaFile();
-    expect(file._records.some(s => s.name == rawAuthor.name)).toStrictEqual(true);
-
-    // We expect to see get contents, but not create or update.
-    expect(getContentsSpy).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateSpy).toHaveBeenCalledTimes(0);
+it("builds signature paths inside the configured namespace only", () => {
+    const fileRepo = new ClaFileRepository(baseSettings);
+    expect(fileRepo.signaturePath("org-cla", "v1", 12345)).toBe("signatures/org-cla/v1/github-id-12345.json");
+    expect(() => fileRepo.signaturePath("../org-cla", "v1", 12345)).toThrow("agreement-id");
+    expect(() => fileRepo.signaturePath("org-cla", "v1/../../x", 12345)).toThrow("agreement-version");
+    expect(() => fileRepo.signaturePath("org-cla", "v1", -1)).toThrow("github id");
 });
 
-it('Creates the file if a file isnt found, but only once', async () => {
-    const [getContentsSpy, createOrUpdateSpy] = mockWith("12345", "67890");
-    const fileRepo = new ClaFileRepository(settings);
+it("reads a matching signature record and verifies the agreement hash", async () => {
+    const getContentSpy = jest.spyOn(mockGitHub.repos, "getContent")
+        .mockImplementation(async () => contentResponse(signatureRecord));
+    const fileRepo = new ClaFileRepository(baseSettings);
 
-    const file = await fileRepo.getClaFile();
-    expect(file._records.length).toBe(0);
-
-    const otherFile = await fileRepo.getClaFile();
-    expect(otherFile._records.length).toBe(0);
-
-    expect(getContentsSpy).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateSpy).toHaveBeenCalledTimes(1);
+    await expect(fileRepo.readSignature("org-cla", "v1", 12345)).resolves.toEqual(signatureRecord);
+    await expect(fileRepo.signatureExists("org-cla", "v1", 12345, "agreement-hash")).resolves.toBe(true);
+    await expect(fileRepo.signatureExists("org-cla", "v1", 12345, "other-hash")).resolves.toBe(false);
+    await expect(fileRepo.signatureExists("org-cla", "v1", 99999, "agreement-hash")).resolves.toBe(false);
+    expect(getContentSpy).toHaveBeenCalledTimes(4);
 });
 
-it('Commits file after getting it', async () => {
-    const [getContentsSpy, createOrUpdateSpy] = mockWith("12345", "67890", claFile);
-    const fileRepo = new ClaFileRepository(settings);
-    const file = await fileRepo.commitClaFile();
-    expect(file._records.some(s => s.name == rawAuthor.name)).toStrictEqual(true);
+it("returns undefined for missing signatures", async () => {
+    jest.spyOn(mockGitHub.repos, "getContent").mockImplementation(async () => { throw { status: 404 }; });
+    const fileRepo = new ClaFileRepository(baseSettings);
 
-    // Should get the file and then update the file.
-    expect(getContentsSpy).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateSpy).toHaveBeenCalledTimes(1);
+    await expect(fileRepo.readSignature("org-cla", "v1", 12345)).resolves.toBeUndefined();
 });
 
+it("writes signature records and refuses readonly repositories", async () => {
+    const getContentSpy = jest.spyOn(mockGitHub.repos, "getContent").mockImplementation(async () => { throw { status: 404 }; });
+    const createSpy = jest.spyOn(mockGitHub.repos, "createOrUpdateFileContents").mockImplementation(async () => ({ data: {} }));
+    const fileRepo = new ClaFileRepository({ ...baseSettings, isRemoteRepoReadonly: false } as IInputSettings);
 
-it('Commits file after creating it', async () => {
-    const [getContentsSpy, createOrUpdateSpy] = mockWith("12345", "67890");
-    const fileRepo = new ClaFileRepository(settings);
+    await fileRepo.writeSignature(signatureRecord);
+    expect(getContentSpy).toHaveBeenCalledWith(expect.objectContaining({
+        path: "signatures/org-cla/v1/github-id-12345.json",
+    }));
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+        path: "signatures/org-cla/v1/github-id-12345.json",
+        branch: "main",
+    }));
 
-    const file = await fileRepo.getClaFile();
-    expect(file._records.length).toBe(0);
-
-    const otherFile = await fileRepo.commitClaFile();
-    expect(otherFile._records.length).toBe(0);
-
-    expect(getContentsSpy).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateSpy).toHaveBeenCalledTimes(2);
+    const readonlyRepo = new ClaFileRepository({ ...baseSettings, isRemoteRepoReadonly: true } as IInputSettings);
+    await expect(readonlyRepo.writeSignature(signatureRecord)).rejects.toThrow("private signature repository");
 });
 
-it("Throws if attempting to create a CLA file in a readonly repo", async () => {
-    const settings = {
-        remoteRepositoryName: "blah",
-        remoteRepositoryOwner: "owner",
-        claFilePath: "asdf",
-        branch: "master",
-        isRemoteRepoReadonly: true,
-        isRemoteRepo: true,
-        octokitRemote: mockGitHub,
-    } as IInputSettings;
-    const [getContentsSpy, createOrUpdateSpy] = mockWith("12345", "67890");
-    const fileRepo = new ClaFileRepository(settings);
+it("hashes the agreement text and fails closed without agreement-path", async () => {
+    jest.spyOn(mockGitHub.repos, "getContent").mockImplementation(async () => contentResponse("hello cla"));
+    const fileRepo = new ClaFileRepository(baseSettings);
 
-    expect(fileRepo.getClaFile()).rejects.toThrow();
-    expect(getContentsSpy).toHaveBeenCalledTimes(1);
-    expect(createOrUpdateSpy).toHaveBeenCalledTimes(0);
+    await expect(fileRepo.getAgreementSha256()).resolves.toBe("fe65eb46385a73950d35a3c80bb9e7b9fe58743ac2ce40c764d11d2be40a8abc");
+
+    const missingAgreementPathRepo = new ClaFileRepository({ ...baseSettings, agreementPath: "" } as IInputSettings);
+    await expect(missingAgreementPathRepo.getAgreementSha256()).rejects.toThrow("agreement-path is required");
+});
+
+it("maps signed authors using agreement hash binding", async () => {
+    const getContentSpy = jest.spyOn(mockGitHub.repos, "getContent")
+        .mockImplementation(async (params) => {
+            if (params.path === "agreements/org-cla/v1.md") {
+                return contentResponse("hello cla");
+            }
+            if (params.path === "signatures/org-cla/v1/github-id-12345.json") {
+                return contentResponse({
+                    ...signatureRecord,
+                    agreement_sha256: "fe65eb46385a73950d35a3c80bb9e7b9fe58743ac2ce40c764d11d2be40a8abc",
+                });
+            }
+            throw { status: 404 };
+        });
+    const fileRepo = new ClaFileRepository(baseSettings);
+    const authorMap = await fileRepo.mapSignedAuthors([
+        new Author({ name: "SomeAccount", id: 12345, signed: false }),
+        new Author({ name: "OtherAccount", id: 999, signed: false }),
+    ]);
+
+    expect(authorMap.getSigned().map(a => a.name)).toEqual(["SomeAccount"]);
+    expect(authorMap.getUnsigned().map(a => a.name)).toEqual(["OtherAccount"]);
+    expect(getContentSpy).toHaveBeenCalledTimes(3);
+});
+
+it("reads and validates repository policy without exposing policy contents", async () => {
+    jest.spyOn(mockGitHub.repos, "getContent").mockImplementation(async () => contentResponse({
+        repo: "some-owner/repo-name",
+        agreement_id: "org-cla",
+        required_version: "v1",
+        allow_later_versions: false,
+        excluded_github_ids: [12345],
+    }));
+    const fileRepo = new ClaFileRepository(baseSettings);
+
+    await expect(fileRepo.getRepoPolicy()).resolves.toEqual({
+        repo: "some-owner/repo-name",
+        agreement_id: "org-cla",
+        required_version: "v1",
+        allow_later_versions: false,
+        allow_bot_users: true,
+        excluded_github_ids: [12345],
+    });
+});
+
+it("rejects unsupported or mismatched repository policy", async () => {
+    jest.spyOn(mockGitHub.repos, "getContent").mockImplementation(async () => contentResponse({
+        repo: "some-owner/repo-name",
+        agreement_id: "org-cla",
+        required_version: "v1",
+        allow_later_versions: true,
+    }));
+    const fileRepo = new ClaFileRepository(baseSettings);
+
+    await expect(fileRepo.getRepoPolicy()).rejects.toThrow("allow_later_versions=true");
 });

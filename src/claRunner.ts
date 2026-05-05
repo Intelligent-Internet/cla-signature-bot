@@ -1,6 +1,5 @@
 import * as core from '@actions/core';
 import { Author } from "./authorMap";
-import { BlockchainPoster } from "./blockchainPoster";
 import { ClaFileRepository } from "./claFileRepository";
 import { Whitelist } from "./claWhitelist";
 import { IInputSettings } from "./inputSettings";
@@ -16,7 +15,6 @@ export class ClaRunner {
     readonly whitelist: Whitelist;
     readonly pullComments: PullComments;
     readonly pullAuthors: PullAuthors;
-    readonly blockchainPoster: BlockchainPoster;
     readonly pullCheckRunner: PullCheckRunner;
 
     constructor({
@@ -25,14 +23,12 @@ export class ClaRunner {
         claWhitelist,
         pullComments,
         pullAuthors,
-        blockchainPoster,
         pullCheckRunner }: {
             inputSettings: IInputSettings;
             claRepo?: ClaFileRepository;
             claWhitelist?: Whitelist;
             pullComments?: PullComments;
             pullAuthors?: PullAuthors;
-            blockchainPoster?: BlockchainPoster;
             pullCheckRunner?: PullCheckRunner;
         }) {
         this.settings = inputSettings;
@@ -40,7 +36,6 @@ export class ClaRunner {
         this.whitelist = (!claWhitelist) ? new Whitelist(this.settings.whitelist) : claWhitelist;
         this.pullComments = (!pullComments) ? new PullComments(this.settings) : pullComments
         this.pullAuthors = (!pullAuthors) ? new PullAuthors(this.settings) : pullAuthors
-        this.blockchainPoster = (!blockchainPoster) ? new BlockchainPoster(this.settings) : blockchainPoster
         this.pullCheckRunner = (!pullCheckRunner) ? new PullCheckRunner(this.settings) : pullCheckRunner;
     }
 
@@ -52,7 +47,12 @@ export class ClaRunner {
         }
 
         // Just drop whitelisted authors entirely, no sense in processing them.
+        const repoPolicy = await this.claFileRepository.getRepoPolicy();
         let rawAuthors: Author[] = await this.pullAuthors.getAuthors();
+        if (repoPolicy?.excluded_github_ids?.length) {
+            const excludedIds = new Set(repoPolicy.excluded_github_ids);
+            rawAuthors = rawAuthors.filter(a => !a.id || !excludedIds.has(a.id));
+        }
         rawAuthors = rawAuthors.filter(a => !this.whitelist.isUserWhitelisted(a));
 
         if (rawAuthors.length === 0) {
@@ -81,7 +81,6 @@ export class ClaRunner {
 
             await Promise.all([
                 ...signatureRecords.map(record => this.claFileRepository.writeSignature(record)),
-                this.blockchainPoster.postToBlockchain(newSignature),
                 this.pullCheckRunner.rerunLastCheck()
             ]);
             authorMap = await this.claFileRepository.mapSignedAuthors(rawAuthors);

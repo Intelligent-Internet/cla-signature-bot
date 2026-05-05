@@ -25,12 +25,12 @@ policy 示例：
   "agreement_id": "your-org-cla",
   "required_version": "v1",
   "allow_later_versions": false,
-  "public_display_fields": ["github_login"],
-  "require_all_commit_authors": true,
   "allow_bot_users": true,
   "excluded_github_ids": []
 }
 ```
+
+配置 `repo-policy-path` 后，Action 会从 private records repo 读取这份 JSON，并校验 `repo`、`agreement_id`、`required_version` 必须分别匹配当前仓库和 workflow 输入，否则 fail closed。当前 `allow_later_versions` 只支持 `false`；later version 匹配尚不支持。`excluded_github_ids` 会在 CLA 检查前把这些 GitHub user id 从作者集合中排除。Policy 文件内容不会打印到公开评论或日志。
 
 4. 初始化签名根目录：
 
@@ -136,6 +136,10 @@ jobs:
 ```
 
 安全注意：使用 `pull_request_target` 时，不要 checkout 或执行 fork PR 中的代码。本 Action 只读取 PR metadata、commits 和 comments。
+
+必填输入说明：`signature-repo`、`agreement-id`、`agreement-version`、`agreement-path` 都是必填项。Action 还要求为 private signature repo 提供 `CLA_RECORDS_TOKEN` 或 `signature-repo-token`；`remote-repo-pat` 仅作为旧 workflow 兼容入口保留。缺少 `agreement-path` 会报错，因为签名记录必须绑定到 CLA 文本的 SHA-256 hash。
+
+Blockchain 说明：blockchain storage 和 webhook forwarding 已移除且不支持。签名事件，包括只写入 private record 的 contributor email metadata，不会发送到外部 blockchain webhook。
 
 ## 5. 配置 Branch Protection
 

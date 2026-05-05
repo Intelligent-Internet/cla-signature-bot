@@ -5,17 +5,21 @@ import { Whitelist } from "../src/claWhitelist";
 import { PullAuthors } from "../src/pullAuthors";
 import { Author } from "../src/authorMap";
 import { ClaFileRepository } from "../src/claFileRepository";
-import { ClaFile } from "../src/claFile";
 import { PullComments } from "../src/pullComments";
 import { SignEvent } from "../src/signEvent";
-import { BlockchainPoster } from "../src/blockchainPoster";
 import { PullCheckRunner } from "../src/pullCheckRunner";
+import { SignatureRecord } from "../src/signatureRecord";
 
 const mockGitHub = github.getOctokit("1234567890123456789012345678901234567890");
 
 function getSettings() {
     return {
-        octokitLocal: mockGitHub
+        octokitLocal: mockGitHub,
+        localRepositoryOwner: "owner",
+        localRepositoryName: "repo",
+        agreementId: "org-cla",
+        agreementVersion: "v1",
+        pullRequestNumber: 1,
     } as IInputSettings;
 }
 
@@ -44,41 +48,44 @@ function getPullAuthorsMock(settings: IInputSettings): [PullAuthors, any] {
     return [authors, getAuthorsSpy];
 }
 
-function getClaFileRepositoryMock(settings: IInputSettings): [ClaFileRepository, any, any] {
+function getClaFileRepositoryMock(settings: IInputSettings): [ClaFileRepository, any, any, any, any] {
     const fileRepo = new ClaFileRepository(settings);
 
-    const getFileSpy = jest.spyOn(fileRepo, 'getClaFile')
-        .mockImplementation(async () => {
-            return new ClaFile();
+    const getRepoPolicySpy = jest.spyOn(fileRepo, 'getRepoPolicy')
+        .mockImplementation(async () => undefined);
+
+    const getAgreementShaSpy = jest.spyOn(fileRepo, 'getAgreementSha256')
+        .mockImplementation(async () => "agreement-hash");
+
+    const mapSignedAuthorsSpy = jest.spyOn(fileRepo, 'mapSignedAuthors')
+        .mockImplementation(async (authors) => {
+            const { AuthorMap } = await import("../src/authorMap");
+            return new AuthorMap(authors.map(a => new Author({
+                name: a.name,
+                id: a.id,
+                email: a.email,
+                emailSource: a.emailSource,
+                pullRequestNo: a.pullRequestNo,
+                signed: false,
+            })));
         });
 
-    const commitFileSpy = jest.spyOn(fileRepo, 'commitClaFile')
-        .mockImplementation(async () => {
-            return new ClaFile();
-        });
+    const writeSignatureSpy = jest.spyOn(fileRepo, 'writeSignature')
+        .mockImplementation(async (_record: SignatureRecord) => {});
 
-    return [fileRepo, getFileSpy, commitFileSpy];
+    return [fileRepo, getRepoPolicySpy, getAgreementShaSpy, mapSignedAuthorsSpy, writeSignatureSpy];
 }
 
 function getPullCommentsMock(settings: IInputSettings): [PullComments, any, any]{
     const pullComments = new PullComments(settings);
 
     const setClaCommentSpy = jest.spyOn(pullComments, 'setClaComment')
-        .mockImplementation(async (params) => (""));
+        .mockImplementation(async () => (""));
 
     const getNewSignaturesSpy = jest.spyOn(pullComments, 'getNewSignatures')
-        .mockImplementation(async (params) => ([]));
+        .mockImplementation(async () => ([]));
 
     return [pullComments, setClaCommentSpy, getNewSignaturesSpy];
-}
-
-function getBlockchainPosterMock(settings: IInputSettings): [BlockchainPoster, any] {
-    const blockchainPoster = new BlockchainPoster(settings);
-
-    const postToBlockchainSpy = jest.spyOn(blockchainPoster, 'postToBlockchain')
-        .mockImplementation(async () => ({}))
-
-    return [blockchainPoster, postToBlockchainSpy];
 }
 
 function getPullCheckRunnerMock(settings: IInputSettings): [PullCheckRunner, any] {
@@ -96,12 +103,8 @@ afterEach(() => {
 
 it("Successfully constructs with full or empty settings", () => {
     const fullSettings = {
-        blockchainStorageFlag: false,
-        blockchainWebhookEndpoint: "",
         branch: "master",
         claDocUrl: "",
-        claFilePath: "",
-        emptyCommitFlag: false,
         isRemoteRepo: true,
         localAccessToken: "",
         octokitLocal: github.getOctokit("1234567890123456789012345678901234567890"),
@@ -109,6 +112,11 @@ it("Successfully constructs with full or empty settings", () => {
         payloadAction: "",
         pullRequestNumber: 1,
         repositoryAccessToken: "",
+        agreementId: "org-cla",
+        agreementVersion: "v1",
+        agreementPath: "agreements/org-cla/v1.md",
+        repoPolicyPath: "",
+        signatureRoot: "signatures",
         localRepositoryName: "name",
         localRepositoryOwner: "owner",
         remoteRepositoryName: "name",
@@ -197,8 +205,16 @@ it('succeeds if a new signature makes everyone signed', async () => {
     settings.pullRequestNumber = 86;
 
     const [authors] = getPullAuthorsMock(settings);
-    const [claFileRepo, , commitFileSpy] = getClaFileRepositoryMock(settings);
-    const [blockchainPoster, postToBlockchainSpy] = getBlockchainPosterMock(settings);
+    const [claFileRepo, , , mapSignedAuthorsSpy, writeSignatureSpy] = getClaFileRepositoryMock(settings);
+    mapSignedAuthorsSpy
+        .mockImplementationOnce(async (authors: Author[]) => {
+            const { AuthorMap } = await import("../src/authorMap");
+            return new AuthorMap(authors.map(a => new Author({ name: a.name, id: a.id, signed: false })));
+        })
+        .mockImplementationOnce(async (authors: Author[]) => {
+            const { AuthorMap } = await import("../src/authorMap");
+            return new AuthorMap(authors.map(a => new Author({ name: a.name, id: a.id, signed: true })));
+        });
     const [pullCheckRunner, rerunLastCheckSpy] = getPullCheckRunnerMock(settings);
 
     const pullComments = new PullComments(settings);
@@ -208,7 +224,7 @@ it('succeeds if a new signature makes everyone signed', async () => {
         .mockImplementation(async (authorMap) => ([
             {
                 comment_id: 23,
-                created_at: "Right Here, Right Now",
+                created_at: "2026-01-01T00:00:00.000Z",
                 id: 1236,
                 name: "SomeEnby",
                 pullRequestNo: 25,
@@ -221,7 +237,6 @@ it('succeeds if a new signature makes everyone signed', async () => {
         pullAuthors: authors,
         claRepo: claFileRepo,
         pullComments: pullComments,
-        blockchainPoster: blockchainPoster,
         pullCheckRunner: pullCheckRunner,
     });
 
@@ -229,7 +244,34 @@ it('succeeds if a new signature makes everyone signed', async () => {
     expect(result).toStrictEqual(true);
     expect(getNewSignaturesSpy).toHaveBeenCalledTimes(1);
     expect(setClaCommentSpy).toHaveBeenCalledTimes(1);
-    expect(commitFileSpy).toHaveBeenCalledTimes(1);
-    expect(postToBlockchainSpy).toHaveBeenCalledTimes(1);
+    expect(writeSignatureSpy).toHaveBeenCalledTimes(1);
     expect(rerunLastCheckSpy).toHaveBeenCalledTimes(1);
+});
+
+it("filters authors excluded by repository policy", async () => {
+    const settings = getSettings();
+    const [authors] = getPullAuthorsMock(settings);
+    const [claFileRepo, getRepoPolicySpy] = getClaFileRepositoryMock(settings);
+    getRepoPolicySpy.mockImplementation(async () => ({
+        repo: "owner/repo",
+        agreement_id: "org-cla",
+        required_version: "v1",
+        allow_later_versions: false,
+        allow_bot_users: true,
+        excluded_github_ids: [1234, 1235, 1236],
+    }));
+    const [pullComments, setClaCommentSpy, getNewSignaturesSpy] = getPullCommentsMock(settings);
+
+    const runner = new ClaRunner({
+        inputSettings: settings,
+        pullAuthors: authors,
+        claRepo: claFileRepo,
+        pullComments,
+    });
+
+    const result = await runner.execute();
+
+    expect(result).toStrictEqual(true);
+    expect(setClaCommentSpy).toHaveBeenCalledTimes(0);
+    expect(getNewSignaturesSpy).toHaveBeenCalledTimes(0);
 });

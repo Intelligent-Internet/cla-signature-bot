@@ -539,8 +539,7 @@ it("Creates CLA comment if it can't find one.", async () => {
     const authorMap = new AuthorMap([author]);
     const result = await localRepo.setClaComment(authorMap);
 
-    // Since the author hasn't signed there should be an x next to the name
-    expect(result.search(`:x: @${author.name}`)).toBeGreaterThan(0);
+    expect(result.search(`- @${author.name}`)).toBeGreaterThan(0);
     // The example text must be present.
     expect(result.search(settings.signatureText)).toBeGreaterThan(0);
     // And a link to the CLA file must be present.
@@ -591,8 +590,7 @@ it("Creates a comment that everyone signed if everyone has signed", async () => 
     const authorMap = new AuthorMap([author]);
     const result = await localRepo.setClaComment(authorMap);
 
-    // Since everyone signed, names shouldn't show up.
-    expect(result.search(author.name)).toBe(-1);
+    expect(result.search(`- @${author.name}`)).toBeGreaterThan(0);
     // And the regex to find the cla title should work.
     expect(result.match(localRepo.BotNameRegex)).toBeTruthy();
 
@@ -627,10 +625,8 @@ it("Counts signed and unsigned committers separately", async () => {
     const authorMap = new AuthorMap([signedAuthor, unsignedAuthor, noAccount]);
     const result = await localRepo.setClaComment(authorMap);
 
-    // Since the author hasn't signed there should be an x next to the name
-    expect(result.search(`:white_check_mark: @${signedAuthor.name}`)).toBeGreaterThan(0);
-    // Since the author hasn't signed there should be an x next to the name
-    expect(result.search(`:x: @${unsignedAuthor.name}`)).toBeGreaterThan(0);
+    expect(result.search(`- @${signedAuthor.name}`)).toBeGreaterThan(0);
+    expect(result.search(`- @${unsignedAuthor.name}`)).toBeGreaterThan(0);
     // And an unknown author should have a separate line
     expect(result.search(`${noAccount.name}`)).toBeGreaterThan(0);
 

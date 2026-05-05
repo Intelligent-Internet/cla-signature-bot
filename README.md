@@ -2,18 +2,17 @@
 
 ![build](https://github.com/Roblox/cla-assistant/workflows/build/badge.svg?branch=master)
 
-A GitHub Action for GitHub-native automated handling of contributor license agreement signatures. This action enables developers to self-sign a CLA without having to run external services for a separate system. The Action handles logic and stores signatures either in the same repository being protected or in a central repository that all protected projects can read and write signatures from.
+A GitHub Action for GitHub-native automated handling of contributor license agreement signatures. This action enables developers to self-sign a CLA without having to run external services for a separate system. The Action stores signatures in a required private signature records repository.
 
 ## Features
 
-1. (De)-Centralized Signature Storage, choose whether repositories store signatures independently or use one central signature file.
+1. Centralized private signature storage.
 1. Fully integrated GitHub Action, no external services required.
 1. No dedicated UI, simply uses comments in Pull Requests.
 1. Contributors can sign the CLA by just posting a Pull Request comment.
 1. Signatures will be stored in a file for auditing.
-1. Optionally store signatures on the Ethereum Blockchain.
 
-Signatures are stored in an easy-to-parse JSON structure either in the same repo running the GitHub Action or in an alternate repo that you can configure.
+Signatures are stored in one JSON file per signer in the private signature repository.
 
 ![Screenshot 2020-01-07 at 16 13 43](https://user-images.githubusercontent.com/33329946/71905595-c33aec80-3168-11ea-8a08-c78f13cb0dcb.png)
 
@@ -37,13 +36,17 @@ jobs:
         uses: roblox/cla-assistant@2.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLA_RECORDS_TOKEN: ${{ secrets.CLA_RECORDS_TOKEN }}
         with:
-          path-to-signatures: 'signatures/version1/cla.json'
+          signature-repo: your-org/cla-records-private
+          agreement-id: your-org-cla
+          agreement-version: v1
+          agreement-path: agreements/your-org-cla/v1.md
+          signature-root: signatures
           url-to-cladocument: 'https://link/to/your/legal/CLA/document/of/choice'
           # This branch can't have protections, commits are made directly to the specified branch.
-          branch: 'master'
+          branch: 'main'
           whitelist: githubuser_example,anotherGitHubuser,bot
-          blockchain-storage-flag: false
 
 ```
 
@@ -78,9 +81,9 @@ Some common accounts you may want to whitelist:
 * `dependabot[bot]` - This is the account GitHub will use to open Dependabot fixes on your account.
 * Your personal account - Since you'll be opening the PR to add it you'll need to either sign the CLA or just add yourself to the whitelist.
 
-### Using the Ethereum Blockchain
+### Blockchain storage
 
-The CLA Signature Bot has the option to additionally store the signatures on the Ethereum Blockchain. To use this feature just set the `blockchain-storage-flag: true`. A detailed description on integrating with the Ethereum Blockchain can be found [here](https://github.com/cla-assistant/blockchain-services). The original implementation of this feature is thanks to [@FabianRiewe](https://github.com/fabianriewe).
+Blockchain storage and webhook forwarding are removed and unsupported. Signature events are not posted to external webhooks.
 
 ### Full list of configuration options
 
@@ -89,20 +92,23 @@ The CLA Signature Bot has the option to additionally store the signatures on the
 | Name                  | Requirement | Description |
 | --------------------- | ----------- | ----------- |
 | `GITHUB_TOKEN`        | _Required_ | Used for interacting with the local repository, such as adding comments to PRs. Does not need to be manually specified in Repository Secrets, [read more](https://help.github.com/en/actions/configuring-and-managing-workflows/authenticating-with-the-github_token). Must be in the form of `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` |
+| `CLA_RECORDS_TOKEN`   | _Required_ | Token with read/write access to the private signature records repository. |
 
 #### Inputs (with: yaml section)
 
 | Name                          | Requirement | Description |
 | ----------------------------- | ----------- | ----------- |
-| `url-to-cladocument`          | _Required_  | The full URL of your CLA document. The CLA bot will link to this document in a Pull Request comment, so make sure it's public. Could be a gist link, or a link to a file in the same repo. |
-| `path-to-signatures`          | _optional_  | Path to the signature file in the repository. Default is `./signatures/cla.json`. |
+| `signature-repo`              | _Required_  | Private `owner/repo` where CLA agreements, policy files, and signature JSON records are stored. |
+| `agreement-id`                | _Required_  | Organization-level CLA agreement identifier. Must be a safe path segment. |
+| `agreement-version`           | _Required_  | Required agreement version. Must be a safe path segment. |
+| `agreement-path`              | _Required_  | Path to the CLA text in the private signature repo. Signature records are bound to this file's SHA-256 hash. |
+| `signature-repo-token`        | _optional_  | Token with read/write access to `signature-repo`. Prefer `CLA_RECORDS_TOKEN`. |
+| `signature-root`              | _optional_  | Root directory in the private signature repo for per-user signature records. Default is `signatures`. |
+| `repo-policy-path`            | _optional_  | Path to a private JSON policy file. When set, `repo`, `agreement_id`, and `required_version` must match exactly; `allow_later_versions` must be `false`; `excluded_github_ids` are excluded from author checks. |
+| `url-to-cladocument`          | _optional_  | The URL of your CLA document shown in the PR comment. Defaults to the configured agreement path. |
 | `branch`                      | _optional_  | Repository branch to store the signature file. Default is `master` |
 | `whitelist`                   | _optional_  | Comma-separated list of accounts to [ignore](https://github.com/roblox/cla-assistant#Whitelist-Accounts). Example: `user1,user2,bot*` |
-| `blockchain-storage-flag`     | _optional_  | Whether to store the Contributor's signature data in the Ethereum blockchain. May be `true` or `false`. Default is `false`. |
-| `blockchain-webhook-endpoint` | _optional_  | The URL to post the blockchain request to. Can be used when running your own [blockchain-services](https://github.com/cla-assistant/blockchain-services) docker container. |
-| `use-remote-repo`             | _optional_  | Whether to use an alternate repository for storing the signature file than the one running the workflow. If `true` the remote repo name and PAT must be provided. Default is `false`. |
-| `remote-repo-name`            | _optional_  | The name of the alternate repository to store the signature file. Must be in `owner/repo-name` format, ex: `roblox/cla-assistant`. Mandatory if `use-remote-repo` is `true`. |
-| `remote-repo-pat`             | _optional_  | A Personal Access Token with permission to write to the remote repo. If the repo is private it must have repo:private scope. Mandatory if `use-remote-repo` is `true`. |
+| `remote-repo-pat`             | _optional_  | Deprecated compatibility token input. Prefer `CLA_RECORDS_TOKEN` or `signature-repo-token`. |
 
 ## License
 

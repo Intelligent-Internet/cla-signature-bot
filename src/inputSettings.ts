@@ -55,11 +55,6 @@ export interface IInputSettings {
     localAccessToken: string
 
     /**
-     * The path in the repo where the CLA file is stored.
-     */
-    claFilePath: string
-
-    /**
      * The root directory in the signature repository for per-user signature JSON.
      */
     signatureRoot: string
@@ -108,21 +103,6 @@ export interface IInputSettings {
      * The text to treat as the signature for the CLA.
      */
     signatureText: string
-
-    /**
-     * Whether to store signature events in the blockchain.
-     */
-    blockchainStorageFlag: boolean
-
-    /**
-     * The blockchain webhook endpoint to call with signature details.
-     */
-    blockchainWebhookEndpoint: string
-
-    /**
-     * Whether to add an empty commit when a signature is detected.
-     */
-    emptyCommitFlag: boolean
 
     /**
      * The URL of the CLA document to link to when asking for signatures.

@@ -7,7 +7,6 @@ const mockGitHub = github.getOctokit("1234567890123456789012345678901234567890")
 const settings = {
     localRepositoryOwner: "some-owner",
     localRepositoryName: "repo-name",
-    claFilePath: "path/to/cla.json",
     branch: "master",
     octokitLocal: mockGitHub,
     workflowName: "WorkflowName"
